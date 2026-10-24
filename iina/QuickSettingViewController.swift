@@ -295,6 +295,8 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
 
     customSpeedTextField.formatter = speedFormatter
 
+    addTranslateSubButton()
+
     if let data = UserDefaults.standard.data(forKey: Preference.Key.userEQPresets.rawValue),
        let dict = try? JSONDecoder().decode(Dictionary<String, EQProfile>.self, from: data) {
       userEQs = dict
@@ -977,6 +979,55 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
     } else {
       player.setTrack(0, forType: .sub)
     }
+  }
+
+  /// A translate button next to "Search Online…". Made here rather than in the nib so the nib stays as upstream has it.
+  private func addTranslateSubButton() {
+    guard let container = subLoadSegmentedControl.superview,
+          let searchOnline = container.subviews.first(where: {
+            ($0 as? NSControl)?.action == #selector(searchOnlineAction(_:))
+          }) else { return }
+    let button: NSSegmentedControl
+    if #available(macOS 11.0, *), let image = NSImage(systemSymbolName: "translate", accessibilityDescription: "Translate") {
+      button = NSSegmentedControl(images: [image], trackingMode: .momentary, target: self,
+                                  action: #selector(translateSubAction(_:)))
+    } else {
+      button = NSSegmentedControl(labels: ["Translate"], trackingMode: .momentary, target: self,
+                                  action: #selector(translateSubAction(_:)))
+    }
+    button.toolTip = "Translate subtitles with Google Translate"
+    button.refusesFirstResponder = true
+    button.translatesAutoresizingMaskIntoConstraints = false
+    container.addSubview(button)
+    NSLayoutConstraint.activate([
+      button.leadingAnchor.constraint(equalTo: searchOnline.trailingAnchor, constant: 8),
+      button.centerYAnchor.constraint(equalTo: searchOnline.centerYAnchor),
+      button.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -16),
+    ])
+  }
+
+  @objc func translateSubAction(_ sender: NSSegmentedControl) {
+    let menu = NSMenu()
+    menu.autoenablesItems = false
+    let target = SubtitleTranslator.targetLanguage
+    if let source = SubtitleTranslator.sourceTrack(for: player) {
+      menu.addItem(withTitle: "Translate \(source.idString) to \(SubtitleTranslator.languageName(target))",
+                   action: #selector(translateSubTo(_:)), target: self, obj: target)
+    } else {
+      menu.addItem(withTitle: "Choose a text subtitle track to translate", enabled: false)
+    }
+    menu.addItem(NSMenuItem.separator())
+    menu.addItem(withTitle: "Translate to:", enabled: false)
+    for language in SubtitleTranslator.languages {
+      menu.addItem(withTitle: language.name, action: #selector(translateSubTo(_:)), target: self,
+                   obj: language.code, stateOn: language.code == target)
+    }
+    NSMenu.popUpContextMenu(menu, with: NSApp.currentEvent!, for: sender)
+  }
+
+  @objc func translateSubTo(_ sender: NSMenuItem) {
+    guard let lang = sender.representedObject as? String else { return }
+    SubtitleTranslator.translate(player: player, to: lang)
   }
 
   @IBAction func searchOnlineAction(_ sender: AnyObject) {

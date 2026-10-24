@@ -412,6 +412,124 @@ return -1;\
   return info;
 }
 
+// MARK: - Reading Subtitles
+
+static NSError *subtitleError(NSString *message) {
+  return [NSError errorWithDomain:@"IINAFFmpegSubtitle" code:-1 userInfo:@{NSLocalizedDescriptionKey: message}];
+}
+
++ (NSArray<NSDictionary *> *)readTextSubtitlesFromFile:(nonnull NSString *)file
+                                         streamOrdinal:(NSInteger)ordinal
+                                          charEncoding:(nullable NSString *)charEncoding
+                                     subtractStartTime:(BOOL)subtractStartTime
+                                                 error:(NSError **)error
+{
+  AVFormatContext *pFormatCtx = NULL;
+  AVCodecContext *pCodecCtx = NULL;
+  AVPacket *packet = NULL;
+  NSMutableArray<NSDictionary *> *cues = nil;
+  NSString *failure = nil;
+  int ret;
+
+  char *cFilename = strdup(file.fileSystemRepresentation);
+  ret = avformat_open_input(&pFormatCtx, cFilename, NULL, NULL);
+  free(cFilename);
+  if (ret < 0) {
+    LOG_ERROR(@"Error when opening file %@ to read subtitles: %s (%d)", file, av_err2str(ret), ret);
+    if (error) *error = subtitleError(@"The file could not be opened.");
+    return nil;
+  }
+  ret = avformat_find_stream_info(pFormatCtx, NULL);
+  if (ret < 0) {
+    LOG_WARN(@"Error when probing %@ to read subtitles: %s (%d)", file, av_err2str(ret), ret);
+  }
+
+  // Find the requested subtitle stream and skip everything else while reading.
+  AVStream *stream = NULL;
+  NSInteger seen = 0;
+  for (unsigned int i = 0; i < pFormatCtx->nb_streams; i++) {
+    AVStream *st = pFormatCtx->streams[i];
+    if (st->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE && seen++ == ordinal) {
+      stream = st;
+    } else {
+      st->discard = AVDISCARD_ALL;
+    }
+  }
+  if (stream == NULL) {
+    failure = @"The subtitle track was not found in the file.";
+    goto end;
+  }
+  const AVCodecDescriptor *descriptor = avcodec_descriptor_get(stream->codecpar->codec_id);
+  if (descriptor == NULL || !(descriptor->props & AV_CODEC_PROP_TEXT_SUB)) {
+    failure = @"These subtitles are pictures (for example Blu-ray PGS), not text, so they cannot be translated.";
+    goto end;
+  }
+
+  const AVCodec *pCodec = avcodec_find_decoder(stream->codecpar->codec_id);
+  pCodecCtx = avcodec_alloc_context3(pCodec);
+  if (pCodec == NULL || pCodecCtx == NULL
+      || avcodec_parameters_to_context(pCodecCtx, stream->codecpar) < 0) {
+    failure = @"This subtitle format is not supported.";
+    goto end;
+  }
+  pCodecCtx->pkt_timebase = stream->time_base;
+  AVDictionary *options = NULL;
+  if (charEncoding != nil) {
+    av_dict_set(&options, "sub_charenc", charEncoding.UTF8String, 0);
+  }
+  ret = avcodec_open2(pCodecCtx, pCodec, &options);
+  av_dict_free(&options);
+  if (ret < 0) {
+    LOG_ERROR(@"Cannot open subtitle decoder for %@: %s (%d)", file, av_err2str(ret), ret);
+    failure = @"This subtitle format is not supported.";
+    goto end;
+  }
+
+  double timeBase = av_q2d(stream->time_base);
+  double offset = 0;
+  if (subtractStartTime && pFormatCtx->start_time != AV_NOPTS_VALUE) {
+    offset = (double)pFormatCtx->start_time / AV_TIME_BASE;
+  }
+
+  packet = av_packet_alloc();
+  cues = [[NSMutableArray alloc] init];
+  while (av_read_frame(pFormatCtx, packet) >= 0) {
+    if (packet->stream_index == stream->index) {
+      AVSubtitle sub;
+      int gotSub = 0;
+      if (avcodec_decode_subtitle2(pCodecCtx, &sub, &gotSub, packet) >= 0 && gotSub) {
+        double base = packet->pts != AV_NOPTS_VALUE ? packet->pts * timeBase : (double)sub.pts / AV_TIME_BASE;
+        double start = base + sub.start_display_time / 1000.0 - offset;
+        double end = -1;
+        if (packet->duration > 0) {
+          end = base + packet->duration * timeBase - offset;
+        } else if (sub.end_display_time > 0 && sub.end_display_time != UINT32_MAX) {
+          end = base + sub.end_display_time / 1000.0 - offset;
+        }
+        NSMutableArray<NSString *> *lines = [[NSMutableArray alloc] init];
+        for (unsigned int i = 0; i < sub.num_rects; i++) {
+          if (sub.rects[i]->type == SUBTITLE_ASS && sub.rects[i]->ass) {
+            NSString *line = [NSString stringWithUTF8String:sub.rects[i]->ass];
+            if (line) [lines addObject:line];
+          }
+        }
+        if (lines.count > 0) {
+          [cues addObject:@{@"start": @(start), @"end": @(end), @"text": [lines componentsJoinedByString:@"\n"]}];
+        }
+        avsubtitle_free(&sub);
+      }
+    }
+    av_packet_unref(packet);
+  }
+
+end:
+  if (failure && error) *error = subtitleError(failure);
+  av_packet_free(&packet);
+  avcodec_free_context(&pCodecCtx);
+  avformat_close_input(&pFormatCtx);
+  return failure ? nil : cues;
+}
+
 // MARK: - Decoding Image
 
 + (NSImage *)createNSImageWithContentsOfURL:(nonnull NSURL *)url

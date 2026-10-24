@@ -128,7 +128,7 @@ class LanguageTokenField: NSTokenField {
 
   func controlTextDidChange(_ obj: Notification) {
     guard let layoutManager = layoutManager else { return }
-    let attachmentChar = Character(UnicodeScalar(NSAttachmentCharacter)!)
+    let attachmentChar = Character("\u{FFFC}")  // NSAttachmentCharacter, an error to use in the macOS 27 SDK
     let finished = layoutManager.attributedString().string.split(separator: attachmentChar).count == 0
     if finished {
       Logger.log("LTF Submitting changes from controlTextDidChange()", level: .verbose)

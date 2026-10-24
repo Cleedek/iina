@@ -226,6 +226,8 @@ struct Preference {
     static let subPos = Key("subPos")
     static let secondarySubPos = Key("secondarySubPos")
     static let subLang = Key("subLang")
+    /// Language subtitles are translated into, remembered between sessions.
+    static let subTranslateLang = Key("subTranslateLang")
     static let legacyOnlineSubSource = Key("onlineSubSource")
     static let onlineSubProvider = Key("onlineSubProvider")
     static let displayInLetterBox = Key("displayInLetterBox")
@@ -956,6 +958,7 @@ struct Preference {
     .subPos: Float(100),
     .secondarySubPos: Float(100),
     .subLang: "",
+    .subTranslateLang: "",
     .legacyOnlineSubSource: 1, /* openSub */
     .onlineSubProvider: OnlineSubtitle.Providers.openSub.id,
     .displayInLetterBox: true,

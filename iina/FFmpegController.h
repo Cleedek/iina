@@ -66,4 +66,21 @@
 
 + (nullable NSDictionary *)probeVideoInfoForFile:(nonnull NSString *)file;
 
+/// Read every cue of a text subtitle stream.
+///
+/// Works for subtitle files (SRT, ASS, VTT) and for subtitle streams embedded in a video file. The text of each cue is in the ASS
+/// dialogue format produced by the FFmpeg decoders, which is the same for every text subtitle codec.
+/// - Parameters:
+///   - file: Path of the file to read.
+///   - ordinal: Which subtitle stream to read, counting only subtitle streams (0 is the first one).
+///   - charEncoding: Character encoding of the text, or null for UTF-8.
+///   - subtractStartTime: `YES` to make the times relative to the start of the file, as mpv shows them for embedded streams.
+///   - error: Set when the stream cannot be read, for example because it is an image based (bitmap) subtitle.
+/// - Returns: An array of dictionaries with the keys `start` and `end` (seconds, `end` is -1 when unknown) and `text`.
++ (nullable NSArray<NSDictionary *> *)readTextSubtitlesFromFile:(nonnull NSString *)file
+                                                  streamOrdinal:(NSInteger)ordinal
+                                                   charEncoding:(nullable NSString *)charEncoding
+                                              subtractStartTime:(BOOL)subtractStartTime
+                                                          error:(NSError * _Nullable * _Nullable)error;
+
 @end
