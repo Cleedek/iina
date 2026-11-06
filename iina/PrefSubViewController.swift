@@ -89,6 +89,18 @@ class PrefSubViewController: PreferenceViewController, PreferenceWindowEmbeddabl
                          withKeyPath: PK.subPos.rawValue,
                          options: [.continuouslyUpdatesValue: true])
 
+    // Establish initial programmatic binding for subtitle override level (primary by default)
+    let overrideKeyPath = PK.subOverrideLevel.rawValue
+    subOverrideLevelSlider.bind(.value, to: UserDefaults.standard,
+                                withKeyPath: overrideKeyPath,
+                                options: [.valueTransformer: ASSOverrideLevelValueTransformer()])
+    subOverrideLevelText.bind(.value, to: UserDefaults.standard,
+                              withKeyPath: overrideKeyPath,
+                              options: [.valueTransformer: ASSOverrideLevelTextTransformer()])
+    subOverrideLevelDescriptiveText.bind(.value, to: UserDefaults.standard,
+                                         withKeyPath: overrideKeyPath,
+                                         options: [.valueTransformer: ASSOverrideLevelDescriptiveTextTransformer()])
+
     NotificationCenter.default.addObserver(forName: .iinaPluginChanged, object: nil, queue: .main) { [unowned self] _ in
       self.refreshSubSources()
     }

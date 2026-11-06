@@ -119,6 +119,7 @@ extension SubChooseViewController: NSSearchFieldDelegate {
           || right.lowercased().contains(query)
       }
     }
+    tableView.deselectAll(nil)
     tableView.reloadData()
     downloadBtn.isEnabled = tableView.selectedRow != -1
   }
