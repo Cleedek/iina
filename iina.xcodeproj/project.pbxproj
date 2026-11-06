@@ -4725,6 +4725,21 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 51537C7229FA26DD00F9A472 /* Nightly.xcconfig */;
 			buildSettings = {
+				DEVELOPMENT_TEAM = 67CQ77V27R;
+				HEADER_SEARCH_PATHS = (
+					"/usr/local/opt/mpv/include/**",
+					"/usr/local/opt/ffmpeg@6/include",
+					/usr/local/opt/libarchive/include,
+					/usr/local/include,
+					"$(inherited)",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					/usr/local/opt/mpv/lib,
+					"/usr/local/opt/ffmpeg@6/lib",
+					/usr/local/opt/libarchive/lib,
+					/usr/local/lib,
+					"$(inherited)",
+				);
 				SKIP_INSTALL = YES;
 			};
 			name = Nightly;
@@ -4738,10 +4753,6 @@
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2017-2026\nCollider LI, et al.\nReleased under GPLv3.";
 				INFOPLIST_KEY_NSMainNibFile = MainMenu;
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
-				LIBRARY_SEARCH_PATHS = (
-					"$(inherited)",
-					"$(PROJECT_DIR)/deps/lib",
-				);
 				SKIP_INSTALL = NO;
 			};
 			name = Nightly;
@@ -4764,6 +4775,21 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 51A0F0F629FA2C8E000130CF /* Beta.xcconfig */;
 			buildSettings = {
+				DEVELOPMENT_TEAM = 67CQ77V27R;
+				HEADER_SEARCH_PATHS = (
+					"/usr/local/opt/mpv/include/**",
+					"/usr/local/opt/ffmpeg@6/include",
+					/usr/local/opt/libarchive/include,
+					/usr/local/include,
+					"$(inherited)",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					/usr/local/opt/mpv/lib,
+					"/usr/local/opt/ffmpeg@6/lib",
+					/usr/local/opt/libarchive/lib,
+					/usr/local/lib,
+					"$(inherited)",
+				);
 				SKIP_INSTALL = YES;
 			};
 			name = Beta;
@@ -4777,10 +4803,6 @@
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2017-2026\nCollider LI, et al.\nReleased under GPLv3.";
 				INFOPLIST_KEY_NSMainNibFile = MainMenu;
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
-				LIBRARY_SEARCH_PATHS = (
-					"$(inherited)",
-					"$(PROJECT_DIR)/deps/lib",
-				);
 				SKIP_INSTALL = NO;
 			};
 			name = Beta;
@@ -4803,6 +4825,21 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 4964988C2919E47900CD61A5 /* Debug.xcconfig */;
 			buildSettings = {
+				DEVELOPMENT_TEAM = 67CQ77V27R;
+				HEADER_SEARCH_PATHS = (
+					"/usr/local/opt/mpv/include/**",
+					"/usr/local/opt/ffmpeg@6/include",
+					/usr/local/opt/libarchive/include,
+					/usr/local/include,
+					"$(inherited)",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					/usr/local/opt/mpv/lib,
+					"/usr/local/opt/ffmpeg@6/lib",
+					/usr/local/opt/libarchive/lib,
+					/usr/local/lib,
+					"$(inherited)",
+				);
 				SKIP_INSTALL = YES;
 			};
 			name = Debug;
@@ -4811,6 +4848,21 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 4964988D2919E47900CD61A5 /* Release.xcconfig */;
 			buildSettings = {
+				DEVELOPMENT_TEAM = 67CQ77V27R;
+				HEADER_SEARCH_PATHS = (
+					"/usr/local/opt/mpv/include/**",
+					"/usr/local/opt/ffmpeg@6/include",
+					/usr/local/opt/libarchive/include,
+					/usr/local/include,
+					"$(inherited)",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					/usr/local/opt/mpv/lib,
+					"/usr/local/opt/ffmpeg@6/lib",
+					/usr/local/opt/libarchive/lib,
+					/usr/local/lib,
+					"$(inherited)",
+				);
 				SKIP_INSTALL = YES;
 			};
 			name = Release;
@@ -4827,10 +4879,6 @@
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2017-2026\nCollider LI, et al.\nReleased under GPLv3.";
 				INFOPLIST_KEY_NSMainNibFile = MainMenu;
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
-				LIBRARY_SEARCH_PATHS = (
-					"$(inherited)",
-					"$(PROJECT_DIR)/deps/lib",
-				);
 				SKIP_INSTALL = NO;
 			};
 			name = Debug;
@@ -4844,10 +4892,6 @@
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2017-2026\nCollider LI, et al.\nReleased under GPLv3.";
 				INFOPLIST_KEY_NSMainNibFile = MainMenu;
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
-				LIBRARY_SEARCH_PATHS = (
-					"$(inherited)",
-					"$(PROJECT_DIR)/deps/lib",
-				);
 				SKIP_INSTALL = NO;
 			};
 			name = Release;
