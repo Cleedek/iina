@@ -93,7 +93,17 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
     }
   }
 
-  var currentTab: TabViewType = .video
+  var currentTab: TabViewType {
+    get {
+      if let name = Preference.string(for: .lastQuickSettingTab) {
+        return TabViewType(name: name) ?? .sub
+      }
+      return .sub
+    }
+    set {
+      Preference.set(newValue.name, for: .lastQuickSettingTab)
+    }
+  }
 
   var observers: [NSObjectProtocol] = []
 
@@ -273,7 +283,7 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
     withAllTableViews { tableView, _ in tableView.backgroundColor = NSColor(named: .sidebarTableBackground)! }
 
     if pendingSwitchRequest == nil {
-      updateTabActiveStatus()
+      switchToTab(currentTab)
     } else {
       switchToTab(pendingSwitchRequest!)
       pendingSwitchRequest = nil

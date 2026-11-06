@@ -352,6 +352,8 @@ struct Preference {
 
     /// Workaround for AppKit defect where showWindow moves the window to a different screen (fixed as of macOS Tahoe).
     static let enableWrongScreenWorkaround = Key("enableWrongScreenWorkaround")
+
+    static let lastQuickSettingTab = Key("lastQuickSettingTab")
   }
 
   // MARK: - Enums
