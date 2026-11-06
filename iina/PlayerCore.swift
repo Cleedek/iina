@@ -1230,6 +1230,7 @@ class PlayerCore: NSObject {
       name = MPVOption.Subtitles.secondarySid
     }
     mpv.setInt(name, index)
+
     getSelectedTracks()
   }
 
@@ -1971,9 +1972,8 @@ class PlayerCore: NSObject {
             try checkTicket(currentTicket)
             loadExternalSubFile(sub)
           }
-          // set sub to the first one
-          try checkTicket(currentTicket)
-          setTrack(1, forType: .sub)
+          // Feature: Subtitles start as None, so don't auto-set to track 1
+          // setTrack(1, forType: .sub)
         }
         autoSearchOnlineSub()
       } catch TicketExpiredError.ticketExpired {
@@ -2228,6 +2228,35 @@ class PlayerCore: NSObject {
     // We can't put this in MPV_EVENT_VIDEO_RECONFIG because it can be emitted with the old video's size
     // after switching to a new video.
     // We should keep these flags until a MPV_EVENT_VIDEO_RECONFIG with the new video's size.
+    // Feature: Force Primary to None and Secondary to Default on first opening
+    if info.justOpenedFile && !info.subTracks.isEmpty {
+      let preferredLangs = Preference.string(for: .subLang)?
+        .split(separator: ",")
+        .map { $0.trimmingCharacters(in: .whitespaces).lowercased() } ?? []
+
+      let bestMatch: MPVTrack? = info.$subTracks.withLock { tracks in
+        let availableTracks = tracks.filter { $0.id != 0 }
+        if availableTracks.isEmpty { return nil }
+
+        return availableTracks.sorted { (t1, t2) -> Bool in
+          let l1 = t1.lang?.lowercased() ?? ""
+          let l2 = t2.lang?.lowercased() ?? ""
+          let i1 = preferredLangs.firstIndex(of: l1) ?? 999
+          let i2 = preferredLangs.firstIndex(of: l2) ?? 999
+          if i1 != i2 { return i1 < i2 }
+          if t1.isDefault != t2.isDefault { return t1.isDefault }
+          return t1.id < t2.id
+        }.first
+      }
+
+      if let sid = bestMatch?.id {
+        mpv.setInt(MPVOption.TrackSelection.sid, 0)
+        mpv.setInt(MPVOption.Subtitles.secondarySid, sid)
+        mpv.setFlag(MPVOption.Subtitles.secondarySubVisibility, false)
+        getSelectedTracks()
+      }
+    }
+
     info.justOpenedFile = false
     info.justStartedFile = false
 
