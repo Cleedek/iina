@@ -1005,7 +1005,7 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
       button = NSSegmentedControl(labels: ["Translate"], trackingMode: .momentary, target: self,
                                   action: #selector(translateSubAction(_:)))
     }
-    button.toolTip = "Translate subtitles with Google Translate"
+    button.toolTip = "Translate subtitles"
     button.refusesFirstResponder = true
     button.translatesAutoresizingMaskIntoConstraints = false
     container.addSubview(button)
@@ -1020,12 +1020,48 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
     let menu = NSMenu()
     menu.autoenablesItems = false
     let target = SubtitleTranslator.targetLanguage
+    let engine = TranslationEngine.current
+    let queue = TranslationQueue.shared
+    if let job = queue.liveJob(for: player) {
+      menu.addItem(withTitle: "\(SubtitleTranslator.languageName(job.lang)): \(TranslationQueue.note(for: job, paused: false))",
+                   enabled: false)
+      menu.addItem(withTitle: "Stop Translating", action: #selector(stopTranslatingSub(_:)), target: self)
+      menu.addItem(NSMenuItem.separator())
+    }
     if let source = SubtitleTranslator.sourceTrack(for: player) {
       menu.addItem(withTitle: "Translate \(source.idString) to \(SubtitleTranslator.languageName(target))",
                    action: #selector(translateSubTo(_:)), target: self, obj: target)
     } else {
       menu.addItem(withTitle: "Choose a text subtitle track to translate", enabled: false)
     }
+    menu.addItem(NSMenuItem.separator())
+
+    let engineMenu = NSMenu()
+    for option in TranslationEngine.allCases {
+      var title = option.title
+      if option.isLanguageModel {
+        title += option.model.isEmpty ? (option == .local ? " (automatic)" : "") : " (\(option.model))"
+      }
+      engineMenu.addItem(withTitle: title, action: #selector(chooseTranslationEngine(_:)), target: self,
+                         obj: option.rawValue, stateOn: option == engine)
+    }
+    let engineItem = menu.addItem(withTitle: "Translate with: \(engine.isLanguageModel && !engine.model.isEmpty ? engine.model : engine.title)")
+    engineItem.submenu = engineMenu
+
+    let placementMenu = NSMenu()
+    for option in TranslationPlacement.allCases {
+      placementMenu.addItem(withTitle: option.title, action: #selector(chooseTranslationPlacement(_:)), target: self,
+                            obj: option.rawValue, stateOn: option == .current)
+    }
+    menu.addItem(withTitle: "Show translation").submenu = placementMenu
+    menu.addItem(withTitle: "Translation Settings…", action: #selector(showTranslationSettings(_:)), target: self)
+    menu.addItem(NSMenuItem.separator())
+    menu.addItem(withTitle: "Add to Translation Queue", action: #selector(addSubToTranslationQueue(_:)), target: self,
+                 enabled: SubtitleTranslator.sourceTrack(for: player) != nil && player.info.currentURL?.isFileURL == true)
+    let waiting = queue.jobs.filter { !$0.isLive && ($0.status == .waiting || $0.status == .running) }.count
+    menu.addItem(withTitle: "Translation Queue…" + (waiting > 0 ? " (\(waiting))" : ""),
+                 action: #selector(showTranslationQueue(_:)), target: self)
+
     menu.addItem(NSMenuItem.separator())
     menu.addItem(withTitle: "Translate to:", enabled: false)
     for language in SubtitleTranslator.languages {
@@ -1038,6 +1074,38 @@ class QuickSettingViewController: NSViewController, NSTableViewDataSource, NSTab
   @objc func translateSubTo(_ sender: NSMenuItem) {
     guard let lang = sender.representedObject as? String else { return }
     SubtitleTranslator.translate(player: player, to: lang)
+  }
+
+  @objc func stopTranslatingSub(_ sender: NSMenuItem) {
+    TranslationQueue.shared.stopLive(player: player)
+  }
+
+  @objc func addSubToTranslationQueue(_ sender: NSMenuItem) {
+    TranslationQueue.shared.add(player: player)
+  }
+
+  @objc func showTranslationQueue(_ sender: AnyObject) {
+    TranslationQueueWindowController.shared.showWindow(self)
+  }
+
+  @objc func chooseTranslationEngine(_ sender: NSMenuItem) {
+    guard let raw = sender.representedObject as? String, let engine = TranslationEngine(rawValue: raw) else { return }
+    TranslationEngine.current = engine
+    // A cloud model can't be used before it has an API key and a model.
+    if engine.needsKey && (engine.apiKey.isEmpty || engine.model.isEmpty) {
+      showTranslationSettings(sender)
+    }
+  }
+
+  @objc func chooseTranslationPlacement(_ sender: NSMenuItem) {
+    guard let raw = sender.representedObject as? String, let placement = TranslationPlacement(rawValue: raw) else { return }
+    TranslationPlacement.current = placement
+  }
+
+  @objc func showTranslationSettings(_ sender: AnyObject) {
+    guard let controller = (NSApp.delegate as? AppDelegate)?.preferenceWindowController,
+          let pane = controller.openPreferenceView(withNibName: "PrefSubViewController") as? PrefSubViewController else { return }
+    DispatchQueue.main.async { pane.revealTranslationSettings() }
   }
 
   @IBAction func searchOnlineAction(_ sender: AnyObject) {

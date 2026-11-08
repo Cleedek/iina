@@ -2,7 +2,8 @@
 //  SubtitleTranslator.swift
 //  iina
 //
-//  Translates a text subtitle track with Google Translate and loads the result as a new track.
+//  Reads, translates with Google, writes and shows subtitle tracks. The translations themselves run in the
+//  TranslationQueue, with Google Translate or a language model (see SubtitleTranslationEngine.swift).
 //
 
 import Foundation
@@ -41,8 +42,10 @@ class SubtitleTranslator {
     return url
   }()
 
+  /// Translations made here: in the cache, or saved next to a video by the queue ("Movie.cs.translated.srt").
   static func isTranslation(_ track: MPVTrack) -> Bool {
-    track.externalFilename?.hasPrefix(cacheDirURL.path) ?? false
+    guard let file = track.externalFilename else { return false }
+    return file.hasPrefix(cacheDirURL.path) || file.hasSuffix(".translated.srt")
   }
 
   /// The track to translate: the primary subtitle, otherwise the secondary one. Translations made here are skipped, so
@@ -53,7 +56,7 @@ class SubtitleTranslator {
       .first { $0.id != 0 && !$0.isImage && !isTranslation($0) }
   }
 
-  struct Cue {
+  struct Cue: Codable, Equatable {
     var start: Double
     var end: Double
     var text: String
@@ -66,93 +69,120 @@ class SubtitleTranslator {
 
   // MARK: - Translating
 
-  /// Translates the primary (or secondary) subtitle track and shows the translation as the primary subtitle. The original
-  /// becomes the secondary subtitle so it is still at hand.
+  /// Translates the primary (or secondary) subtitle track of the video playing now. The translation queue does the
+  /// work, before anything else in it, and shows the translation where the placement setting says.
+  @MainActor
   static func translate(player: PlayerCore, to lang: String) {
     targetLanguage = lang
-    let langName = languageName(lang)
     guard let track = sourceTrack(for: player), let videoURL = player.info.currentURL else {
       player.sendOSD(.customWithDetail("Nothing to translate", "Choose a text subtitle track first."))
       return
     }
-    let output = outputURL(video: videoURL, track: track, lang: lang)
-    if FileManager.default.fileExists(atPath: output.path) {
-      show(output, player: player, source: track, lang: lang)
-      player.sendOSD(.custom("Subtitles translated to \(langName)"))
-      return
-    }
-
-    player.sendOSD(.custom("Translating subtitles to \(langName)…"), autoHide: false)
-    let ordinal = player.info.subTracks.filter { !$0.isExternal }.sorted { $0.id < $1.id }.firstIndex(of: track) ?? 0
-    let encoding = player.info.subEncoding
-    Task.detached {
-      do {
-        let cues = try readCues(track: track, videoURL: videoURL, ordinal: ordinal, encoding: encoding)
-        let translated = try await translateTexts(cues.map { toHtml($0.text) }, to: lang)
-        var result = cues
-        for i in result.indices { result[i].text = fromHtml(translated[i]) }
-        try writeSRT(result, to: output)
-        await MainActor.run {
-          guard player.info.currentURL == videoURL else { return }
-          show(output, player: player, source: track, lang: lang)
-          player.sendOSD(.custom("Subtitles translated to \(langName)"))
-        }
-      } catch {
-        player.log("Subtitle translation failed: \(error.localizedDescription)", level: .error)
-        await MainActor.run {
-          player.sendOSD(.customWithDetail("Translation didn't work", error.localizedDescription))
-        }
-      }
-    }
+    TranslationQueue.shared.translateLive(player: player, track: track, videoURL: videoURL, lang: lang)
   }
 
-  /// One file per video, source track and language, so the same translation is never requested twice.
-  private static func outputURL(video: URL, track: MPVTrack, lang: String) -> URL {
-    let key = "\(video.absoluteString)|\(track.externalFilename ?? "#\(track.srcId ?? track.id)")|\(track.lang ?? "")"
+  /// Where an embedded track is among the video's subtitle streams, counted the way FFmpeg reads them.
+  static func streamOrdinal(of track: MPVTrack, in player: PlayerCore) -> Int {
+    player.info.subTracks.filter { !$0.isExternal }.sorted { $0.id < $1.id }.firstIndex(of: track) ?? 0
+  }
+
+  /// The source of a translation as the cache knows it: the video, and the subtitle file or the stream's place inside
+  /// the video. The queue and the player name a source the same way, so each finds the other's translation. (mpv's
+  /// track ids and languages can't be used: FFmpeg, which the queue reads files with, numbers and names them otherwise.)
+  static func sourceKey(video: URL, subtitleFile: String?, streamOrdinal: Int) -> String {
+    let file = subtitleFile.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }
+    return "\(video.resolvingSymlinksInPath().absoluteString)|\(file ?? "#s\(streamOrdinal)")"
+  }
+
+  /// One file per source, language and translator, so the same translation is never requested twice.
+  static func outputURL(sourceKey: String, video: URL, lang: String, engine: TranslationEngine, model: String) -> URL {
+    let key = "\(sourceKey)|\(engine.rawValue)|\(model)"
     let hash = SHA256.hash(data: Data(key.utf8)).prefix(6).map { String(format: "%02x", $0) }.joined()
     let name = video.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "/", with: "_")
     return cacheDirURL.appendingPathComponent("\(name).\(hash).\(lang).srt")
   }
 
-  private static func show(_ url: URL, player: PlayerCore, source: MPVTrack, lang: String) {
-    let wasPrimary = source.id == player.info.sid
-    let loaded = player.info.subTracks.first { $0.externalFilename == url.path }
-    if let loaded {
-      player.setTrack(loaded.id, forType: .sub)
+  /// "Czech (gemma3:12b)", the name the translated track gets in the subtitle list.
+  static func trackTitle(lang: String, model: String) -> String {
+    "\(languageName(lang)) (\(model.isEmpty ? "translated" : model))"
+  }
+
+  // MARK: - Showing
+
+  /// Loads the translation (or reloads it, if an older version is loaded) and puts it where `placement` says.
+  static func show(_ url: URL, title: String, lang: String, player: PlayerCore, source: MPVTrack?,
+                   placement: TranslationPlacement) {
+    let sourceWasPrimary = source != nil && source?.id == player.info.sid
+    let sourceWasSecondary = source != nil && source?.id == player.info.secondSid
+    guard let id = reload(url, title: title, lang: lang, player: player)
+            ?? add(url, title: title, lang: lang, player: player) else { return }
+    let asPrimary: Bool
+    switch placement {
+    case .primary: asPrimary = true
+    case .secondary: asPrimary = false
+    case .replace: asPrimary = !sourceWasSecondary
+    }
+    // mpv refuses a track that is already selected in the other slot.
+    if asPrimary {
+      if player.info.secondSid == id { player.setTrack(0, forType: .secondSub) }
+      player.setTrack(id, forType: .sub)
+      if placement == .primary && sourceWasPrimary, let source { player.setTrack(source.id, forType: .secondSub) }
+      player.toggleSubVisibility(true)
     } else {
-      let title = "\(languageName(lang)) (translated)"
-      player.mpv.command(.subAdd, args: [url.path, "select", title, lang], checkError: false) { code in
-        if code < 0 { player.log("Cannot load translated subtitles: \(url.path)", level: .error) }
-      }
+      if player.info.sid == id { player.setTrack(0, forType: .sub) }
+      player.setTrack(id, forType: .secondSub)
+      player.toggleSecondSubVisibility(true)
     }
-    if wasPrimary {
-      player.setTrack(source.id, forType: .secondSub)
-    }
-    player.toggleSubVisibility(true)
+  }
+
+  /// Loads the file again after it changed and keeps the new track where the old one was: primary, secondary or off.
+  /// Returns the new track, or nil if the file wasn't loaded.
+  @discardableResult
+  static func reload(_ url: URL, title: String, lang: String, player: PlayerCore) -> Int? {
+    guard let old = player.info.subTracks.last(where: { $0.externalFilename == url.path }) else { return nil }
+    let wasPrimary = old.id == player.info.sid
+    let wasSecondary = old.id == player.info.secondSid
+    guard let new = add(url, title: title, lang: lang, player: player), new != old.id else { return old.id }
+    if wasPrimary { player.setTrack(new, forType: .sub) }
+    if wasSecondary { player.setTrack(new, forType: .secondSub) }
+    player.mpv.command(.subRemove, args: [String(old.id)], checkError: false)
+    player.getTrackInfo()
     player.getSelectedTracks()
+    return new
+  }
+
+  /// Adds the file as a subtitle track without selecting it and returns the new track.
+  private static func add(_ url: URL, title: String, lang: String, player: PlayerCore) -> Int? {
+    var added = false
+    player.mpv.command(.subAdd, args: [url.path, "auto", title, lang], checkError: false) { added = $0 >= 0 }
+    guard added else {
+      player.log("Cannot load translated subtitles: \(url.path)", level: .error)
+      return nil
+    }
+    player.getTrackInfo()
+    return player.info.subTracks.filter { $0.externalFilename == url.path }.map(\.id).max()
   }
 
   // MARK: - Reading
 
-  private static func readCues(track: MPVTrack, videoURL: URL, ordinal: Int, encoding: String?) throws -> [Cue] {
-    let path: String
-    var charEncoding: String?
+  static func readCues(track: MPVTrack, videoURL: URL, ordinal: Int, encoding: String?) throws -> [Cue] {
     if let external = track.externalFilename {
       guard FileManager.default.fileExists(atPath: external) else {
         throw TranslationError("Only subtitles from a file on this Mac can be translated.")
       }
-      path = external
-      charEncoding = try detectEncoding(of: URL(fileURLWithPath: external), preferred: encoding)
-    } else {
-      guard videoURL.isFileURL else {
-        throw TranslationError("Subtitles inside an online stream cannot be translated yet.")
-      }
-      path = videoURL.path
+      return try readCues(file: external, ordinal: 0, external: true, encoding: encoding)
     }
-    let raw = try FFmpegController.readTextSubtitles(fromFile: path,
-                                                     streamOrdinal: track.isExternal ? 0 : ordinal,
-                                                     charEncoding: charEncoding,
-                                                     subtractStartTime: !track.isExternal)
+    guard videoURL.isFileURL else {
+      throw TranslationError("Subtitles inside an online stream cannot be translated yet.")
+    }
+    return try readCues(file: videoURL.path, ordinal: ordinal, external: false, encoding: encoding)
+  }
+
+  /// Reads the text subtitles of a subtitle file (`external`), or the subtitle stream at `ordinal` inside a video.
+  static func readCues(file: String, ordinal: Int, external: Bool, encoding: String?) throws -> [Cue] {
+    let charEncoding = external ? try detectEncoding(of: URL(fileURLWithPath: file), preferred: encoding) : nil
+    let raw = try FFmpegController.readTextSubtitles(fromFile: file, streamOrdinal: ordinal,
+                                                     charEncoding: charEncoding, subtractStartTime: !external)
     var cues: [Cue] = raw.compactMap { dict in
       guard let start = dict["start"] as? Double, let end = dict["end"] as? Double,
             let text = dict["text"] as? String else { return nil }
@@ -208,45 +238,46 @@ class SubtitleTranslator {
   // Google Translate's free web endpoint (the one its own widgets use, no key). One `q` per subtitle comes back as one
   // result per subtitle, so the timing stays cue for cue. Text goes as HTML so <i>/<b> and line breaks survive.
   private static let googleURL = "https://translate.googleapis.com/translate_a/t?client=gtx&sl=auto&format=html&tl="
-  private static let batchChars = 4000
-  private static let batchLines = 120
 
-  private static func translateTexts(_ texts: [String], to lang: String) async throws -> [String] {
-    var batches: [[String]] = []
-    var current: [String] = [], size = 0
-    for text in texts {
-      if !current.isEmpty && (size + text.count > batchChars || current.count >= batchLines) {
-        batches.append(current)
-        current = []
+  private static let googleBatchChars = 4000
+  private static let googleBatchLines = 120
+
+  /// Translates lines (HTML) with Google, a few batches at a time: a whole film takes a few seconds.
+  static func googleTranslateAll(_ lines: [String], to lang: String) async throws -> [String] {
+    var batches: [Range<Int>] = []
+    var start = 0, size = 0
+    for (i, line) in lines.enumerated() {
+      if i > start && (size + line.count > googleBatchChars || i - start >= googleBatchLines) {
+        batches.append(start..<i)
+        start = i
         size = 0
       }
-      current.append(text)
-      size += text.count
+      size += line.count
     }
-    if !current.isEmpty { batches.append(current) }
+    if start < lines.count { batches.append(start..<lines.count) }
 
+    var results = [String](repeating: "", count: lines.count)
     // Two requests at a time: fast for a full film, gentle enough not to get blocked.
-    var results = [[String]](repeating: [], count: batches.count)
-    try await withThrowingTaskGroup(of: (Int, [String]).self) { group in
+    try await withThrowingTaskGroup(of: (Range<Int>, [String]).self) { group in
       var next = 0
       while next < min(2, batches.count) {
-        let index = next
-        group.addTask { (index, try await translateBatch(batches[index], to: lang)) }
+        let range = batches[next]
+        group.addTask { (range, try await googleTranslate(Array(lines[range]), to: lang)) }
         next += 1
       }
-      while let (index, translated) = try await group.next() {
-        results[index] = translated
+      while let (range, texts) = try await group.next() {
+        for (k, text) in texts.enumerated() { results[range.lowerBound + k] = text }
         if next < batches.count {
-          let index = next
-          group.addTask { (index, try await translateBatch(batches[index], to: lang)) }
+          let range = batches[next]
+          group.addTask { (range, try await googleTranslate(Array(lines[range]), to: lang)) }
           next += 1
         }
       }
     }
-    return results.flatMap { $0 }
+    return results
   }
 
-  private static func translateBatch(_ lines: [String], to lang: String) async throws -> [String] {
+  private static func googleTranslate(_ lines: [String], to lang: String) async throws -> [String] {
     var allowed = CharacterSet.alphanumerics
     allowed.insert(charactersIn: "-._*")
     let body = lines.map { "q=" + ($0.addingPercentEncoding(withAllowedCharacters: allowed) ?? "") }.joined(separator: "&")
@@ -260,11 +291,13 @@ class SubtitleTranslator {
     do {
       (data, response) = try await URLSession.shared.data(for: request)
     } catch {
-      throw TranslationError("Google Translate could not be reached. Check the internet connection.")
+      if (error as? URLError)?.code == .cancelled || Task.isCancelled { throw CancellationError() }
+      throw TranslationServiceError("Google Translate could not be reached. Check the internet connection.", temporary: true)
     }
     let status = (response as? HTTPURLResponse)?.statusCode ?? 0
     if status == 429 {
-      throw TranslationError("Google Translate says \"too many requests\". Wait a few minutes and try again.")
+      throw TranslationServiceError("Google Translate says \"too many requests\". Wait a few minutes and try again.",
+                                    temporary: true)
     }
     guard status == 200 else { throw TranslationError("Google Translate answered HTTP \(status).") }
     guard let json = try? JSONSerialization.jsonObject(with: data) as? [Any] else {
@@ -282,7 +315,7 @@ class SubtitleTranslator {
     return texts
   }
 
-  private static func toHtml(_ text: String) -> String {
+  static func toHtml(_ text: String) -> String {
     var s = text.replacingOccurrences(of: "&", with: "&amp;")
       .replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
     for tag in ["i", "b"] {
@@ -292,7 +325,7 @@ class SubtitleTranslator {
     return s.replacingOccurrences(of: "\n", with: "<br>")
   }
 
-  private static func fromHtml(_ html: String) -> String {
+  static func fromHtml(_ html: String) -> String {
     var s = html.replacingOccurrences(of: "\\s*<br\\s*/?>\\s*", with: "\n", options: [.regularExpression, .caseInsensitive])
     s = s.replacingOccurrences(of: "<(?!/?[ib]>)[^>]*>", with: "", options: .regularExpression)
     for (entity, char) in [("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""), ("&#39;", "'"), ("&nbsp;", " "), ("&amp;", "&")] {
@@ -303,7 +336,7 @@ class SubtitleTranslator {
 
   // MARK: - Writing
 
-  private static func writeSRT(_ cues: [Cue], to url: URL) throws {
+  static func writeSRT(_ cues: [Cue], to url: URL) throws {
     func time(_ seconds: Double) -> String {
       let ms = max(0, Int((seconds * 1000).rounded()))
       return String(format: "%02d:%02d:%02d,%03d", ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60, ms % 1000)

@@ -228,6 +228,18 @@ struct Preference {
     static let subLang = Key("subLang")
     /// Language subtitles are translated into, remembered between sessions.
     static let subTranslateLang = Key("subTranslateLang")
+    /// Who translates subtitles: google, local, gemini, anthropic or openai.
+    static let subTranslateEngine = Key("subTranslateEngine")
+    /// Address of the local model server (Ollama, LM Studio). Empty means Ollama's default address.
+    static let subTranslateLocalURL = Key("subTranslateLocalURL")
+    /// The model chosen for each language model engine, keyed by engine. Empty means automatic.
+    static let subTranslateModels = Key("subTranslateModels")
+    /// Where a translation is shown: primary, secondary or replace.
+    static let subTranslatePlacement = Key("subTranslatePlacement")
+    /// With a language model: show Google Translate's version while the model works, and fill in lines it leaves out.
+    static let subTranslateGoogleHelp = Key("subTranslateGoogleHelp")
+    /// Files from the translation queue also get their translation saved next to them.
+    static let subTranslateSaveNextToOriginal = Key("subTranslateSaveNextToOriginal")
     static let legacyOnlineSubSource = Key("onlineSubSource")
     static let onlineSubProvider = Key("onlineSubProvider")
     static let displayInLetterBox = Key("displayInLetterBox")
@@ -961,6 +973,12 @@ struct Preference {
     .secondarySubPos: Float(100),
     .subLang: "",
     .subTranslateLang: "",
+    .subTranslateEngine: "google",
+    .subTranslateLocalURL: "",
+    .subTranslateModels: [String: String](),
+    .subTranslatePlacement: "primary",
+    .subTranslateGoogleHelp: true,
+    .subTranslateSaveNextToOriginal: true,
     .legacyOnlineSubSource: 1, /* openSub */
     .onlineSubProvider: OnlineSubtitle.Providers.openSub.id,
     .displayInLetterBox: true,

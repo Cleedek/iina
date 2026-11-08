@@ -83,4 +83,10 @@
                                               subtractStartTime:(BOOL)subtractStartTime
                                                           error:(NSError * _Nullable * _Nullable)error;
 
+/// Lists the subtitle streams of a file without decoding them.
+/// - Returns: One dictionary per subtitle stream, in file order, with `ordinal` (its place among the subtitle streams,
+///   as `readTextSubtitlesFromFile` takes it), `isText`, and when known `language`, `title` and `codec`. Nil when the
+///   file can't be opened.
++ (nullable NSArray<NSDictionary *> *)subtitleStreamsInFile:(nonnull NSString *)file;
+
 @end

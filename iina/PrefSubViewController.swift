@@ -25,7 +25,16 @@ class PrefSubViewController: PreferenceViewController, PreferenceWindowEmbeddabl
   }
 
   override var sectionViews: [NSView] {
-    return [sectionAutoLoadView, sectionASSView, sectionTextSubView, sectionPositionView, sectionOnlineSubView, sectionOtherView]
+    return [sectionAutoLoadView, sectionASSView, sectionTextSubView, sectionPositionView, sectionOnlineSubView,
+            sectionTranslationView, sectionOtherView]
+  }
+
+  /// Built in code, see SubtitleTranslationSettingsView.
+  lazy var sectionTranslationView = SubtitleTranslationSettingsView()
+
+  /// Scrolls the Translation section into view.
+  func revealTranslationSettings() {
+    sectionTranslationView.scrollToVisible(sectionTranslationView.bounds)
   }
 
   @IBOutlet var sectionAutoLoadView: NSView!

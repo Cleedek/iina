@@ -414,6 +414,38 @@ return -1;\
 
 // MARK: - Reading Subtitles
 
++ (NSArray<NSDictionary *> *)subtitleStreamsInFile:(nonnull NSString *)file
+{
+  AVFormatContext *pFormatCtx = NULL;
+  char *cFilename = strdup(file.fileSystemRepresentation);
+  int ret = avformat_open_input(&pFormatCtx, cFilename, NULL, NULL);
+  free(cFilename);
+  if (ret < 0) {
+    LOG_ERROR(@"Error when opening file %@ to list subtitles: %s (%d)", file, av_err2str(ret), ret);
+    return nil;
+  }
+  // Matroska and MP4 describe their tracks in the header, so this doesn't need to read the whole file.
+  NSMutableArray<NSDictionary *> *streams = [[NSMutableArray alloc] init];
+  NSInteger ordinal = 0;
+  for (unsigned int i = 0; i < pFormatCtx->nb_streams; i++) {
+    AVStream *st = pFormatCtx->streams[i];
+    if (st->codecpar->codec_type != AVMEDIA_TYPE_SUBTITLE) continue;
+    const AVCodecDescriptor *descriptor = avcodec_descriptor_get(st->codecpar->codec_id);
+    NSMutableDictionary *stream = [@{
+      @"ordinal": @(ordinal++),
+      @"isText": @(descriptor != NULL && (descriptor->props & AV_CODEC_PROP_TEXT_SUB) != 0),
+    } mutableCopy];
+    if (descriptor) stream[@"codec"] = @(descriptor->name);
+    AVDictionaryEntry *language = av_dict_get(st->metadata, "language", NULL, 0);
+    if (language && language->value) stream[@"language"] = @(language->value);
+    AVDictionaryEntry *title = av_dict_get(st->metadata, "title", NULL, 0);
+    if (title && title->value) stream[@"title"] = @(title->value);
+    [streams addObject:stream];
+  }
+  avformat_close_input(&pFormatCtx);
+  return streams;
+}
+
 static NSError *subtitleError(NSString *message) {
   return [NSError errorWithDomain:@"IINAFFmpegSubtitle" code:-1 userInfo:@{NSLocalizedDescriptionKey: message}];
 }
